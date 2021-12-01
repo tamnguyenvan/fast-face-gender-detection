@@ -72,7 +72,7 @@ class Compose(object):
 
     def __call__(self, img, boxes=None, labels=None, genders=None):
         for t in self.transforms:
-            img, boxes, labels, genders = t(img, boxes, labels, genders=None)
+            img, boxes, labels, genders = t(img, boxes, labels, genders)
         return img, boxes, labels, genders
 
 
@@ -381,7 +381,7 @@ class RandomSampleCrop_v2(object):
         height, width, _ = image.shape
         while True:
             # randomly choose a mode
-            mode = random.choice(self.sample_options)
+            mode = self.sample_options[random.choice(len(self.sample_options))]
             if mode is None:
                 return image, boxes, labels, genders
 

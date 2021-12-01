@@ -17,6 +17,9 @@ from vision.datasets.voclike_dataset import VOCLikeDataset
 from vision.nn.multibox_loss import MultiboxLoss
 from vision.ssd.config.fd_config import define_img_size
 from vision.utils.misc import str2bool, Timer, freeze_net_layers, store_labels
+import warnings
+
+warnings.filterwarnings('ignore', "(Possibly )?corrupt EXIF data", UserWarning)
 
 parser = argparse.ArgumentParser(
     description='train With Pytorch')
@@ -137,9 +140,10 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
     running_loss = 0.0
     # running_regression_loss = 0.0
     # running_classification_loss = 0.0
+    running_acc = 0.0
     for i, data in enumerate(loader):
         print(".", end="", flush=True)
-        images, boxes, labels = data
+        images, boxes, labels, genders = data
         images = images.to(device)
         boxes = boxes.to(device)
         labels = labels.to(device)
@@ -152,20 +156,28 @@ def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
         loss.backward()
         optimizer.step()
 
+        pos_mask = labels > 0
+        num_gender_classes = gender_confidence.size(2)
+        pred_genders = gender_confidence[pos_mask, :].reshape(-1, num_gender_classes).max(-1)[1]
+        gt_genders = genders[pos_mask]
+        
+        acc = (pred_genders == gt_genders).float().sum() / gt_genders.size(0)
         running_loss += loss.item()
-        # running_regression_loss += regression_loss.item()
-        # running_classification_loss += classification_loss.item()
+        running_acc += acc.item()
         if i and i % debug_steps == 0:
             print(".", flush=True)
             avg_loss = running_loss / debug_steps
             # avg_reg_loss = running_regression_loss / debug_steps
             # avg_clf_loss = running_classification_loss / debug_steps
+            avg_acc = running_acc / debug_steps
             logging.info(
                 f"Epoch: {epoch}, Step: {i}, " +
-                f"Average Loss: {avg_loss:.4f}"
+                f"Average Loss: {avg_loss:.4f}, " +
+                f"Average Accuracy: {avg_acc:.4f}"
             )
 
             running_loss = 0.0
+            running_acc = 0.0
             # running_regression_loss = 0.0
             # running_classification_loss = 0.0
 
@@ -176,8 +188,10 @@ def test(loader, net, criterion, device):
     # running_regression_loss = 0.0
     # running_classification_loss = 0.0
     num = 0
+    total = 0
+    total_correct = 0
     for _, data in enumerate(loader):
-        images, boxes, labels = data
+        images, boxes, labels, genders = data
         images = images.to(device)
         boxes = boxes.to(device)
         labels = labels.to(device)
@@ -188,11 +202,18 @@ def test(loader, net, criterion, device):
             confidence, gender_confidence, locations = net(images)
             loss = criterion(confidence, gender_confidence, locations, labels, genders, boxes)
             # loss = regression_loss + classification_loss
+            pos_mask = labels > 0
+            num_gender_classes = gender_confidence.size(2)
+            pred_genders = gender_confidence[pos_mask, :].reshape(-1, num_gender_classes).max(-1)[1]
+            gt_genders = genders[pos_mask]
+            
+            total_correct += (pred_genders == gt_genders).float().sum().item()
+            total += gt_genders.size(0)
 
         running_loss += loss.item()
         # running_regression_loss += regression_loss.item()
         # running_classification_loss += classification_loss.item()
-    return running_loss / num
+    return running_loss / num, total_correct / total
 
 
 if __name__ == '__main__':
@@ -361,6 +382,7 @@ if __name__ == '__main__':
             sys.exit(1)
 
     logging.info(f"Start training from epoch {last_epoch + 1}.")
+    best_acc = 0.
     for epoch in range(last_epoch + 1, args.num_epochs):
         if args.optimizer_type != "Adam":
             if args.scheduler != "poly":
@@ -374,11 +396,17 @@ if __name__ == '__main__':
 
         if epoch % args.validation_epochs == 0 or epoch == args.num_epochs - 1:
             logging.info("lr rate :{}".format(optimizer.param_groups[0]['lr']))
-            val_loss = test(val_loader, net, criterion, DEVICE)
+            val_loss, val_acc = test(val_loader, net, criterion, DEVICE)
             logging.info(
                 f"Epoch: {epoch}, " +
-                f"Validation Loss: {val_loss:.4f}" 
+                f"Validation Loss: {val_loss:.4f}, " +
+                f"Validation Accuracy: {val_acc:.4f}" 
             )
-            model_path = os.path.join(args.checkpoint_folder, f"{args.net}-Epoch-{epoch}-Loss-{val_loss}.pth")
-            net.module.save(model_path)
+            if val_acc > best_acc:
+                best_acc = val_acc
+                model_path = os.path.join(args.checkpoint_folder, f"{args.net}-Epoch-{epoch}-Loss-{val_loss}-Acc-{val_acc}.pth")
+                if mgpu:
+                    net.module.save(model_path)
+                else:
+                    net.save(model_path)
             logging.info(f"Saved model {model_path}")

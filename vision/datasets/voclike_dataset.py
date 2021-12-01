@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 
 import cv2
 import numpy as np
+from PIL import Image
 
 
 class VOCLikeDataset:
@@ -104,7 +105,6 @@ class VOCLikeDataset:
                 y1 = float(bbox.find('ymin').text) - 1
                 x2 = float(bbox.find('xmax').text) - 1
                 y2 = float(bbox.find('ymax').text) - 1
-                print(x1, y1, x2, y2, annotation_file)
                 gender_name = bbox.find('gender').text.lower().strip()
                 boxes.append([x1, y1, x2, y2])
 
@@ -120,6 +120,10 @@ class VOCLikeDataset:
 
     def _read_image(self, image_id):
         image_file = self.root / f"JPEGImages/{image_id}.jpg"
-        image = cv2.imread(str(image_file))
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_pil = Image.open(image_file).convert('RGB')
+        image = np.array(image_pil)
+        # image = cv2.imread(str(image_file))
+        # if image.ndim == 2:
+        #     image = np.stack([image, image, image], -1)
+        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
