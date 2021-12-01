@@ -13,6 +13,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, MultiStepLR
 from torch.utils.data import DataLoader, ConcatDataset
 
 from vision.datasets.voc_dataset import VOCDataset
+from vision.datasets.voclike_dataset import VOCLikeDataset
 from vision.nn.multibox_loss import MultiboxLoss
 from vision.ssd.config.fd_config import define_img_size
 from vision.utils.misc import str2bool, Timer, freeze_net_layers, store_labels
@@ -20,7 +21,7 @@ from vision.utils.misc import str2bool, Timer, freeze_net_layers, store_labels
 parser = argparse.ArgumentParser(
     description='train With Pytorch')
 
-parser.add_argument("--dataset_type", default="voc", type=str,
+parser.add_argument("--dataset_type", default="voclike", type=str,
                     help='Specify dataset type. Currently support voc.')
 
 parser.add_argument('--datasets', nargs='+', help='Dataset directory path')
@@ -34,6 +35,8 @@ parser.add_argument('--freeze_base_net', action='store_true',
                     help="Freeze base net layers.")
 parser.add_argument('--freeze_net', action='store_true',
                     help="Freeze all the layers except the prediction head.")
+parser.add_argument('--freeze_two_headers', action='store_true',
+                    help="Freeze all the layers except the gender prediction head.")                    
 
 # Params for SGD
 parser.add_argument('--lr', '--learning-rate', default=1e-2, type=float,
@@ -53,6 +56,7 @@ parser.add_argument('--extra_layers_lr', default=None, type=float,
 parser.add_argument('--base_net',
                     help='Pretrained base model')
 parser.add_argument('--pretrained_ssd', help='Pre-trained base model')
+parser.add_argument('--pretrained_ssd_with_two_headers', help='Pre-trained base model')
 parser.add_argument('--resume', default=None, type=str,
                     help='Checkpoint state_dict file to resume training from')
 
@@ -131,64 +135,64 @@ def adjust_learning_rate(optimizer, i_iter):
 def train(loader, net, criterion, optimizer, device, debug_steps=100, epoch=-1):
     net.train(True)
     running_loss = 0.0
-    running_regression_loss = 0.0
-    running_classification_loss = 0.0
+    # running_regression_loss = 0.0
+    # running_classification_loss = 0.0
     for i, data in enumerate(loader):
         print(".", end="", flush=True)
         images, boxes, labels = data
         images = images.to(device)
         boxes = boxes.to(device)
         labels = labels.to(device)
+        genders = genders.to(device)
 
         optimizer.zero_grad()
-        confidence, locations = net(images)
-        regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)  # TODO CHANGE BOXES
-        loss = regression_loss + classification_loss
+        confidence, gender_confidence, locations = net(images)
+        loss = criterion(confidence, gender_confidence, locations, labels, genders, boxes)  # TODO CHANGE BOXES
+        # loss = regression_loss + classification_loss
         loss.backward()
         optimizer.step()
 
         running_loss += loss.item()
-        running_regression_loss += regression_loss.item()
-        running_classification_loss += classification_loss.item()
+        # running_regression_loss += regression_loss.item()
+        # running_classification_loss += classification_loss.item()
         if i and i % debug_steps == 0:
             print(".", flush=True)
             avg_loss = running_loss / debug_steps
-            avg_reg_loss = running_regression_loss / debug_steps
-            avg_clf_loss = running_classification_loss / debug_steps
+            # avg_reg_loss = running_regression_loss / debug_steps
+            # avg_clf_loss = running_classification_loss / debug_steps
             logging.info(
                 f"Epoch: {epoch}, Step: {i}, " +
-                f"Average Loss: {avg_loss:.4f}, " +
-                f"Average Regression Loss {avg_reg_loss:.4f}, " +
-                f"Average Classification Loss: {avg_clf_loss:.4f}"
+                f"Average Loss: {avg_loss:.4f}"
             )
 
             running_loss = 0.0
-            running_regression_loss = 0.0
-            running_classification_loss = 0.0
+            # running_regression_loss = 0.0
+            # running_classification_loss = 0.0
 
 
 def test(loader, net, criterion, device):
     net.eval()
     running_loss = 0.0
-    running_regression_loss = 0.0
-    running_classification_loss = 0.0
+    # running_regression_loss = 0.0
+    # running_classification_loss = 0.0
     num = 0
     for _, data in enumerate(loader):
         images, boxes, labels = data
         images = images.to(device)
         boxes = boxes.to(device)
         labels = labels.to(device)
+        genders = genders.to(device)
         num += 1
 
         with torch.no_grad():
-            confidence, locations = net(images)
-            regression_loss, classification_loss = criterion(confidence, locations, labels, boxes)
-            loss = regression_loss + classification_loss
+            confidence, gender_confidence, locations = net(images)
+            loss = criterion(confidence, gender_confidence, locations, labels, genders, boxes)
+            # loss = regression_loss + classification_loss
 
         running_loss += loss.item()
-        running_regression_loss += regression_loss.item()
-        running_classification_loss += classification_loss.item()
-    return running_loss / num, running_regression_loss / num, running_classification_loss / num
+        # running_regression_loss += regression_loss.item()
+        # running_classification_loss += classification_loss.item()
+    return running_loss / num
 
 
 if __name__ == '__main__':
@@ -223,7 +227,13 @@ if __name__ == '__main__':
             label_file = os.path.join(args.checkpoint_folder, "voc-model-labels.txt")
             store_labels(label_file, dataset.class_names)
             num_classes = len(dataset.class_names)
-
+        elif args.dataset_type == 'voclike':
+            dataset = VOCLikeDataset(dataset_path, transform=train_transform,
+                                 target_transform=target_transform)
+            label_file = os.path.join(args.checkpoint_folder, "voclike-model-labels.txt")
+            store_labels(label_file, dataset.gender_class_names)
+            num_classes = len(dataset.class_names)
+            num_gender_classes = len(dataset.gender_class_names)
         else:
             raise ValueError(f"Dataset tpye {args.dataset_type} is not supported.")
         datasets.append(dataset)
@@ -234,8 +244,8 @@ if __name__ == '__main__':
                               num_workers=args.num_workers,
                               shuffle=True)
     logging.info("Prepare Validation datasets.")
-    if args.dataset_type == "voc":
-        val_dataset = VOCDataset(args.validation_dataset, transform=test_transform,
+    if args.dataset_type == "voclike":
+        val_dataset = VOCLikeDataset(args.validation_dataset, transform=test_transform,
                                  target_transform=target_transform, is_test=True)
     logging.info("validation dataset size: {}".format(len(val_dataset)))
 
@@ -243,10 +253,11 @@ if __name__ == '__main__':
                             num_workers=args.num_workers,
                             shuffle=False)
     logging.info("Build network.")
-    net = create_net(num_classes)
+    net = create_net(num_classes, num_gender_classes)
 
     # add multigpu_train
-    if torch.cuda.device_count() >= 1:
+    mgpu = torch.cuda.device_count() > 1
+    if mgpu:
         cuda_index_list = [int(v.strip()) for v in args.cuda_index.split(",")]
         net = nn.DataParallel(net, device_ids=cuda_index_list)
         logging.info("use gpu :{}".format(cuda_index_list))
@@ -277,6 +288,18 @@ if __name__ == '__main__':
         freeze_net_layers(net.extras)
         params = itertools.chain(net.regression_headers.parameters(), net.classification_headers.parameters())
         logging.info("Freeze all the layers except prediction heads.")
+    elif args.freeze_two_headers:
+        if mgpu:
+            m = net.module
+        else:
+            m = net
+        freeze_net_layers(m.base_net)
+        freeze_net_layers(m.source_layer_add_ons)
+        freeze_net_layers(m.extras)
+        freeze_net_layers(m.regression_headers)
+        freeze_net_layers(m.classification_headers)
+        params = m.gender_headers.parameters()
+        logging.info("Freeze all the layers except gender prediction heads.")
     else:
         params = [
             {'params': net.module.base_net.parameters(), 'lr': base_net_lr},
@@ -300,6 +323,9 @@ if __name__ == '__main__':
     elif args.pretrained_ssd:
         logging.info(f"Init from pretrained ssd {args.pretrained_ssd}")
         net.init_from_pretrained_ssd(args.pretrained_ssd)
+    elif args.pretrained_ssd_with_two_headers:
+        logging.info(f"Init from pretrained ssd (with two headers) {args.pretrained_ssd_with_two_headers}")
+        net.init_from_pretrained_ssd_with_two_headers(args.pretrained_ssd_with_two_headers)
     logging.info(f'Took {timer.end("Load Model"):.2f} seconds to load the model.')
 
     net.to(DEVICE)
@@ -348,12 +374,10 @@ if __name__ == '__main__':
 
         if epoch % args.validation_epochs == 0 or epoch == args.num_epochs - 1:
             logging.info("lr rate :{}".format(optimizer.param_groups[0]['lr']))
-            val_loss, val_regression_loss, val_classification_loss = test(val_loader, net, criterion, DEVICE)
+            val_loss = test(val_loader, net, criterion, DEVICE)
             logging.info(
                 f"Epoch: {epoch}, " +
-                f"Validation Loss: {val_loss:.4f}, " +
-                f"Validation Regression Loss {val_regression_loss:.4f}, " +
-                f"Validation Classification Loss: {val_classification_loss:.4f}"
+                f"Validation Loss: {val_loss:.4f}" 
             )
             model_path = os.path.join(args.checkpoint_folder, f"{args.net}-Epoch-{epoch}-Loss-{val_loss}.pth")
             net.module.save(model_path)

@@ -18,11 +18,11 @@ class TrainAugmentation:
             ToPercentCoords(),
             Resize(self.size),
             SubtractMeans(self.mean),
-            lambda img, boxes=None, labels=None: (img / std, boxes, labels),
+            lambda img, boxes=None, labels=None, genders=None: (img / std, boxes, labels, genders),
             ToTensor(),
         ])
 
-    def __call__(self, img, boxes, labels):
+    def __call__(self, img, boxes, labels, genders):
         """
 
         Args:
@@ -30,7 +30,7 @@ class TrainAugmentation:
             boxes: boundding boxes in the form of (x1, y1, x2, y2).
             labels: labels of boxes.
         """
-        return self.augment(img, boxes, labels)
+        return self.augment(img, boxes, labels, genders)
 
 
 class TestTransform:
@@ -39,12 +39,12 @@ class TestTransform:
             ToPercentCoords(),
             Resize(size),
             SubtractMeans(mean),
-            lambda img, boxes=None, labels=None: (img / std, boxes, labels),
+            lambda img, boxes=None, labels=None, genders=None: (img / std, boxes, labels, genders),
             ToTensor(),
         ])
 
-    def __call__(self, image, boxes, labels):
-        return self.transform(image, boxes, labels)
+    def __call__(self, image, boxes, labels, genders):
+        return self.transform(image, boxes, labels, genders)
 
 
 class PredictionTransform:
@@ -52,7 +52,7 @@ class PredictionTransform:
         self.transform = Compose([
             Resize(size),
             SubtractMeans(mean),
-            lambda img, boxes=None, labels=None: (img / std, boxes, labels),
+            lambda img, boxes=None, labels=None, genders=None: (img / std, boxes, labels, genders),
             ToTensor()
         ])
 
