@@ -29,20 +29,20 @@ class MultiboxLoss(nn.Module):
             labels (batch_size, num_priors): real labels of all the priors.
             boxes (batch_size, num_priors, 4): real boxes corresponding all the priors.
         """
-        # num_classes = confidence.size(2)
+        num_classes = confidence.size(2)
         num_gender_classes = gender_confidence.size(2)
-        # with torch.no_grad():
-        #     # derived from cross_entropy=sum(log(p))
-        #     loss = -F.log_softmax(confidence, dim=2)[:, :, 0]
-        #     mask = box_utils.hard_negative_mining(loss, labels, self.neg_pos_ratio)
+        with torch.no_grad():
+            # derived from cross_entropy=sum(log(p))
+            loss = -F.log_softmax(confidence, dim=2)[:, :, 0]
+            mask = box_utils.hard_negative_mining(loss, labels, self.neg_pos_ratio)
 
         # confidence = confidence[mask, :]
         # classification_loss = F.cross_entropy(confidence.reshape(-1, num_classes), labels[mask], reduction='sum')
         # gender_confidence = gender_confidence[mask, :]
         # loss = F.cross_entropy(gender_confidence.reshape(-1, num_gender_classes), genders[mask], reduction='sum')
-        pos_mask = labels > 0
-        loss = F.cross_entropy(gender_confidence[pos_mask, :].reshape(-1, num_gender_classes),
-                               genders[pos_mask], reduction='sum')
+        # pos_mask = labels > 0
+        loss = F.cross_entropy(gender_confidence[mask, :].reshape(-1, num_gender_classes),
+                               genders[mask], reduction='sum')
         # predicted_locations = predicted_locations[pos_mask, :].reshape(-1, 4)
         # gt_locations = gt_locations[pos_mask, :].reshape(-1, 4)
         # smooth_l1_loss = F.smooth_l1_loss(predicted_locations, gt_locations, reduction='sum')  # smooth_l1_loss

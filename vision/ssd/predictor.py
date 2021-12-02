@@ -35,17 +35,20 @@ class Predictor:
         with torch.no_grad():
             for i in range(1):
                 self.timer.start()
-                scores, boxes = self.net.forward(images)
+                scores, gender_scores, boxes = self.net.forward(images)
                 print("Inference time: ", self.timer.end())
         boxes = boxes[0]
         scores = scores[0]
+        gender_scores = gender_scores[0]
         if not prob_threshold:
             prob_threshold = self.filter_threshold
         # this version of nms is slower on GPU, so we move data to CPU.
         boxes = boxes.to(cpu_device)
         scores = scores.to(cpu_device)
+        gender_scores = gender_scores.to(cpu_device)
         picked_box_probs = []
         picked_labels = []
+        picked_genders = []
         for class_index in range(1, scores.size(1)):
             probs = scores[:, class_index]
             mask = probs > prob_threshold
@@ -53,8 +56,9 @@ class Predictor:
             if probs.size(0) == 0:
                 continue
             subset_boxes = boxes[mask, :]
+            subset_gender_scores = gender_scores[mask, :]
             box_probs = torch.cat([subset_boxes, probs.reshape(-1, 1)], dim=1)
-            box_probs = box_utils.nms(box_probs, self.nms_method,
+            box_probs, idxs = box_utils.nms(box_probs, self.nms_method,
                                       score_threshold=prob_threshold,
                                       iou_threshold=self.iou_threshold,
                                       sigma=self.sigma,
@@ -62,11 +66,13 @@ class Predictor:
                                       candidate_size=self.candidate_size)
             picked_box_probs.append(box_probs)
             picked_labels.extend([class_index] * box_probs.size(0))
+            picked_genders.append(subset_gender_scores.max(1)[1][idxs])
         if not picked_box_probs:
-            return torch.tensor([]), torch.tensor([]), torch.tensor([])
+            return torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([])
         picked_box_probs = torch.cat(picked_box_probs)
         picked_box_probs[:, 0] *= width
         picked_box_probs[:, 1] *= height
         picked_box_probs[:, 2] *= width
         picked_box_probs[:, 3] *= height
-        return picked_box_probs[:, :4], torch.tensor(picked_labels), picked_box_probs[:, 4]
+        picked_genders = torch.cat(picked_genders)
+        return picked_box_probs[:, :4], torch.tensor(picked_labels), picked_box_probs[:, 4], picked_genders

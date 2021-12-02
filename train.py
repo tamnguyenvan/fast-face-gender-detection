@@ -314,12 +314,17 @@ if __name__ == '__main__':
             m = net.module
         else:
             m = net
-        freeze_net_layers(m.base_net)
-        freeze_net_layers(m.source_layer_add_ons)
-        freeze_net_layers(m.extras)
-        freeze_net_layers(m.regression_headers)
-        freeze_net_layers(m.classification_headers)
-        params = m.gender_headers.parameters()
+        # freeze_net_layers(m.base_net)
+        # freeze_net_layers(m.source_layer_add_ons)
+        # freeze_net_layers(m.extras)
+        # freeze_net_layers(m.regression_headers)
+        # freeze_net_layers(m.classification_headers)
+        params = []
+        for name, param in m.named_parameters():
+            if 'gender_' not in name:
+                param.requires_grad = False
+            else:
+                params.append(param)
         logging.info("Freeze all the layers except gender prediction heads.")
     else:
         params = [

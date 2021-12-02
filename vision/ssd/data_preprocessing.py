@@ -57,5 +57,5 @@ class PredictionTransform:
         ])
 
     def __call__(self, image):
-        image, _, _ = self.transform(image)
+        image, _, _, _ = self.transform(image)
         return image

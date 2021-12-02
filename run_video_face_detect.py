@@ -37,10 +37,17 @@ label_path = "./models/voc-model-labels.txt"
 
 net_type = args.net_type
 
-cap = cv2.VideoCapture(args.video_path)  # capture from video
+source = args.video_path
+try:
+    source = int(source)
+except:
+    pass
+cap = cv2.VideoCapture(source)  # capture from video
 # cap = cv2.VideoCapture(0)  # capture from camera
 
-class_names = [name.strip() for name in open(label_path).readlines()]
+# class_names = [name.strip() for name in open(label_path).readlines()]
+class_names = ['BACKGROUND', 'face']
+gender_class_names = ['BACKGROUND', 'female', 'male']
 num_classes = len(class_names)
 test_device = args.test_device
 
@@ -48,9 +55,11 @@ candidate_size = args.candidate_size
 threshold = args.threshold
 
 if net_type == 'slim':
-    model_path = "models/pretrained/version-slim-320.pth"
+    # model_path = "models/pretrained/version-slim-320.pth"
+    # model_path = 'slim-model.pth'
+    model_path = 'slim-model.pth'
     # model_path = "models/pretrained/version-slim-640.pth"
-    net = create_mb_tiny_fd(len(class_names), is_test=True, device=test_device)
+    net = create_mb_tiny_fd(len(class_names), num_gender_classes=len(gender_class_names), is_test=True, device=test_device)
     predictor = create_mb_tiny_fd_predictor(net, candidate_size=candidate_size, device=test_device)
 elif net_type == 'RFB':
     model_path = "models/pretrained/version-RFB-320.pth"
@@ -71,13 +80,16 @@ while True:
         break
     image = cv2.cvtColor(orig_image, cv2.COLOR_BGR2RGB)
     timer.start()
-    boxes, labels, probs = predictor.predict(image, candidate_size / 2, threshold)
+    boxes, labels, probs, genders = predictor.predict(image, candidate_size / 2, threshold)
     interval = timer.end()
-    print('Time: {:.6f}s, Detect Objects: {:d}.'.format(interval, labels.size(0)))
+    print('Time: {:.6f}s, FPS: {} Detect Objects: {:d}.'.format(interval, int(1/interval), labels.size(0)))
     for i in range(boxes.size(0)):
-        box = boxes[i, :]
-        label = f" {probs[i]:.2f}"
+        box = list(map(int, boxes[i, :].numpy()))
+        label = f" {probs[i].item():.2f}"
+        gender = gender_class_names[genders[i].item()]
         cv2.rectangle(orig_image, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 4)
+        cv2.putText(orig_image, gender, (box[0], box[1]-5), cv2.FONT_HERSHEY_PLAIN,
+                    1, (0, 255, 0), 2)
 
         # cv2.putText(orig_image, label,
         #             (box[0], box[1] - 10),
